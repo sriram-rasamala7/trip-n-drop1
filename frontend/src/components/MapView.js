@@ -1,8 +1,6 @@
-import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
 import L from 'leaflet';
-import "leaflet-routing-machine";
-import "leaflet/dist/leaflet.css";
+import 'leaflet/dist/leaflet.css';
+import 'leaflet-routing-machine';
 
 
 // Fix for default marker icons in react-leaflet

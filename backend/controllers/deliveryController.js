@@ -57,13 +57,13 @@ const checkAvailableOrders = async (req, res) => {
         return false;
       }
 
-      // Check if delivery is on route (within 1.5km)
-      return isOnRoute(
+      // Use flexible route matching (2km radius instead of 1.5km)
+      return isOnRouteFlexible(
         delivery.pickupLocation.coordinates,
         delivery.deliveryLocation.coordinates,
         journeyStart.coordinates,
         journeyEnd.coordinates,
-        1.5
+        2.0  // Increased radius for more flexibility
       );
     });
 

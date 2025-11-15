@@ -1,8 +1,9 @@
-import React from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet';
+import React, { useEffect } from 'react';
+import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
+import 'leaflet-routing-machine';
+import 'leaflet-routing-machine/dist/leaflet-routing-machine.css';
 
-// Fix for default marker icons in react-leaflet
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -10,12 +11,37 @@ L.Icon.Default.mergeOptions({
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
 });
 
+// Routing component
+const RoutingMachine = ({ pickup, delivery }) => {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map || !pickup || !delivery) return;
+
+    const routingControl = L.Routing.control({
+      waypoints: [
+        L.latLng(pickup.lat, pickup.lng),
+        L.latLng(delivery.lat, delivery.lng)
+      ],
+      routeWhileDragging: false,
+      addWaypoints: false,
+      draggableWaypoints: false,
+      fitSelectedRoutes: true,
+      showAlternatives: false,
+      lineOptions: {
+        styles: [{ color: '#4F46E5', weight: 4 }]
+      },
+      createMarker: () => null, // Don't create default markers
+    }).addTo(map);
+
+    return () => map.removeControl(routingControl);
+  }, [map, pickup, delivery]);
+
+  return null;
+};
+
 const MapView = ({ pickup, delivery, center }) => {
-  const defaultCenter = center || [12.9716, 77.5946]; // Bangalore coordinates
-  
-  const positions = [];
-  if (pickup) positions.push([pickup.lat, pickup.lng]);
-  if (delivery) positions.push([delivery.lat, delivery.lng]);
+  const defaultCenter = center || [12.9716, 77.5946];
 
   return (
     <MapContainer
@@ -41,8 +67,8 @@ const MapView = ({ pickup, delivery, center }) => {
         </Marker>
       )}
       
-      {positions.length === 2 && (
-        <Polyline positions={positions} color="blue" />
+      {pickup && delivery && (
+        <RoutingMachine pickup={pickup} delivery={delivery} />
       )}
     </MapContainer>
   );

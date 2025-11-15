@@ -1,3 +1,5 @@
+const { isOnRouteFlexible } = require('../utils/distance');
+
 const DeliveryRequest = require('../models/DeliveryRequest');
 const Journey = require('../models/Journey');
 const { isOnRoute } = require('../utils/distance');

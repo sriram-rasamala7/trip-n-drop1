@@ -1,77 +1,78 @@
-import React, { useEffect, useRef } from 'react';
-import { Loader } from '@googlemaps/js-api-loader';
+// src/components/MapView.jsx
+import React from "react";
+import { MapContainer, TileLayer, Marker, Popup, Polyline } from "react-leaflet";
+import L from "leaflet";
+import "leaflet/dist/leaflet.css";
+// Remove this import unless you actually render an L.Routing control component
+// import "leaflet-routing-machine";
 
-const toLatLng = (loc) => {
-if (!loc) return null;
-// Accepts {lat, lng} or {coordinates:{lat,lng}} or {latLng:[lat,lng]}
-if (Array.isArray(loc.latLng)) return { lat: Number(loc.latLng), lng: Number(loc.latLng) };​
-if (loc.coordinates && typeof loc.coordinates.lat === 'number') return { lat: loc.coordinates.lat, lng: loc.coordinates.lng };
-if (typeof loc.lat === 'number' && typeof loc.lng === 'number') return { lat: loc.lat, lng: loc.lng };
-return null;
-};
-
-export default function MapView({ pickup, delivery, height = 360, zoom = 13 }) {
-const mapRef = useRef(null);
-const map = useRef(null);
-const directionsService = useRef(null);
-const directionsRenderer = useRef(null);
-
-useEffect(() => {
-const loader = new Loader({
-apiKey: process.env.REACT_APP_GOOGLE_MAPS_KEY,
-version: 'weekly',
-libraries: ['places']
+// Fix default marker icons in bundlers
+import marker2x from "leaflet/dist/images/marker-icon-2x.png";
+import marker from "leaflet/dist/images/marker-icon.png";
+import markerShadow from "leaflet/dist/images/marker-shadow.png";
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: marker2x,
+  iconUrl: marker,
+  shadowUrl: markerShadow,
 });
-const a = toLngLat(pickup);
-const b = toLngLat(delivery);
 
-// Clear route layer if exists
-if (map.current.getLayer(routeId)) {
-  map.current.removeLayer(routeId);
-  map.current.removeSource(routeId);
-}
-
-const markers = [];
-if (a) markers.push(new mapboxgl.Marker({ color: '#0ea5e9' }).setLngLat(a).addTo(map.current));
-if (b) markers.push(new mapboxgl.Marker({ color: '#f59e0b' }).setLngLat(b).addTo(map.current));
-
-const fit = () => {
-  if (a && b) {
-    const bounds = new mapboxgl.LngLatBounds(a, a);
-    bounds.extend(b);
-    map.current.fitBounds(bounds, { padding: 60 });
-  } else if (a || b) {
-    map.current.setCenter(a || b);
-    map.current.setZoom(14);
+// Normalize inputs to [lat, lng]
+const toLatLngTuple = (loc) => {
+  if (!loc) return null;
+  // {lat, lng}
+  if (typeof loc.lat === "number" && typeof loc.lng === "number") {
+    const a = Number(loc.lat), b = Number(loc.lng);
+    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
   }
+  // {coordinates:{lat,lng}}
+  if (loc.coordinates && typeof loc.coordinates.lat === "number" && typeof loc.coordinates.lng === "number") {
+    const a = Number(loc.coordinates.lat), b = Number(loc.coordinates.lng);
+    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
+  }
+  // [lat, lng]
+  if (Array.isArray(loc) && loc.length === 2) {
+    const a = Number(loc[0]), b = Number(loc[1]);
+    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
+  }
+  return null;
 };
 
-async function drawRoute() {
-  if (!(a && b)) return fit();
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${a[0]},${a[1]};${b[0]},${b[1]}?geometries=geojson&access_token=${mapboxgl.accessToken}`;
-  const res = await fetch(url);
-  const json = await res.json();
-  const line = json?.routes?.?.geometry;
-  if (!line) return fit();
+const MapView = ({ pickup, delivery, center, height = 400, zoom = 13 }) => {
+  const defaultCenter = Array.isArray(center) && center.length === 2 ? center : [12.9716, 77.5946];
+  const pA = toLatLngTuple(pickup);
+  const pB = toLatLngTuple(delivery);
 
-  map.current.addSource(routeId, { type: 'geojson', data: { type: 'Feature', geometry: line } });
-  map.current.addLayer({
-    id: routeId,
-    type: 'line',
-    source: routeId,
-    paint: { 'line-color': '#0ea5e9', 'line-width': 5 }
-  });
-  const coords = line.coordinates;
-  const bounds = coords.reduce((b, c) => b.extend(c), new mapboxgl.LngLatBounds(coords, coords));
-  map.current.fitBounds(bounds, { padding: 60 });
-}
+  const positions = [];
+  if (pA) positions.push(pA);
+  if (pB) positions.push(pB);
 
-drawRoute();
+  return (
+    <div className="rounded-lg shadow-lg" style={{ height }}>
+      <MapContainer center={pA || pB || defaultCenter} zoom={zoom} style={{ height: "100%", width: "100%" }}>
+        <TileLayer
+          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          attribution="&copy; OpenStreetMap contributors"
+        />
 
-return () => {
-  markers.forEach(m => m.remove());
+        {pA && (
+          <Marker position={pA}>
+            <Popup>Pickup Location</Popup>
+          </Marker>
+        )}
+
+        {pB && (
+          <Marker position={pB}>
+            <Popup>Delivery Location</Popup>
+          </Marker>
+        )}
+
+        {positions.length === 2 && (
+          <Polyline positions={positions} pathOptions={{ color: "blue", weight: 4 }} />
+        )}
+      </MapContainer>
+    </div>
+  );
 };
-}, [pickup, delivery, zoom]);
 
-return <div ref={ref} style={{ width: '100%', height }} />;
-}  
+export default MapView;

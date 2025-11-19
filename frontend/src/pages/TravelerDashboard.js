@@ -1,112 +1,242 @@
-// src/components/MapView.js
-import React from "react";
-import { MapContainer, TileLayer, Marker, Popup, Polyline, useMap } from "react-leaflet";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import React, { useState, useEffect, useCallback } from 'react';
+import { deliveryAPI } from '../services/api';
+import { useAuth } from '../context/AuthContext';
+import DeliveryCard from '../components/DeliveryCard';
+import LocationInput from '../components/LocationInput';
 
-// IMPORTANT: Only import routing-machine if you actually use L.Routing.* controls elsewhere.
-// Comment it out if not used to prevent build/runtime issues.
-// import "leaflet-routing-machine";
+const toArray = (val) => (Array.isArray(val) ? val : Array.isArray(val?.data) ? val.data : []);
 
-// Fix default marker icons so they load correctly in bundlers
-import marker2x from "leaflet/dist/images/marker-icon-2x.png";
-import marker from "leaflet/dist/images/marker-icon.png";
-import markerShadow from "leaflet/dist/images/marker-shadow.png";
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: marker2x,
-  iconUrl: marker,
-  shadowUrl: markerShadow,
-});
+const TravelerDashboard = () => {
+  const { user } = useAuth();
+  const [myJobs, setMyJobs] = useState([]);
+  const [availableOrders, setAvailableOrders] = useState([]);
+  const [showCheckOrders, setShowCheckOrders] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [otpInput, setOtpInput] = useState({});
 
-// Utility to normalize any supported input to [lat, lng]
-const toLatLngTuple = (loc) => {
-  if (!loc) return null;
-  // {lat, lng}
-  if (typeof loc.lat === "number" && typeof loc.lng === "number") {
-    const a = Number(loc.lat);
-    const b = Number(loc.lng);
-    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
-  }
-  // {coordinates: {lat, lng}}
-  if (
-    loc.coordinates &&
-    typeof loc.coordinates.lat === "number" &&
-    typeof loc.coordinates.lng === "number"
-  ) {
-    const a = Number(loc.coordinates.lat);
-    const b = Number(loc.coordinates.lng);
-    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
-  }
-  // [lat, lng]
-  if (Array.isArray(loc) && loc.length === 2) {
-    const a = Number(loc[0]);
-    const b = Number(loc[1]);
-    return Number.isFinite(a) && Number.isFinite(b) ? [a, b] : null;
-  }
-  return null;
-};
+  const [journeyData, setJourneyData] = useState({
+    startLocation: null,
+    endLocation: null,
+    vehicleType: 'geared motorbike',
+  });
 
-const Fit = ({ points }) => {
-  const map = useMap();
-  React.useEffect(() => {
-    if (!map || !Array.isArray(points)) return;
-    const valid = points.filter(
-      (p) =>
-        Array.isArray(p) &&
-        p.length === 2 &&
-        Number.isFinite(p[0]) &&
-        Number.isFinite(p[1])
-    );
-    if (valid.length === 0) return;
-    if (valid.length === 1) {
-      map.setView(valid[0], 14);
-    } else {
-      const bounds = L.latLngBounds(valid);
-      map.fitBounds(bounds, { padding: [60, 60] });
+  const fetchMyJobs = useCallback(async () => {
+    try {
+      const response = await deliveryAPI.getMyJobs();
+      setMyJobs(toArray(response));
+    } catch (error) {
+      console.error('Error fetching jobs:', error);
+      setMyJobs([]);
     }
-  }, [map, points]);
-  return null;
-};
+  }, []);
 
-const MapView = ({ pickup, delivery, center, height = 360, zoom = 13 }) => {
-  const fallbackCenter = Array.isArray(center) && center.length === 2 ? center : [12.9716, 77.5946]; // Bengaluru
-  const pA = toLatLngTuple(pickup);
-  const pB = toLatLngTuple(delivery);
+  useEffect(() => {
+    fetchMyJobs();
+  }, [fetchMyJobs]);
 
-  const positions = [];
-  if (pA) positions.push(pA);
-  if (pB) positions.push(pB);
-  const hasBoth = positions.length === 2;
+  const handleCheckOrders = async () => {
+    if (!journeyData.startLocation || !journeyData.endLocation) {
+      alert('Please select both start and end locations');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const response = await deliveryAPI.checkOrders({
+        journeyStart: journeyData.startLocation,
+        journeyEnd: journeyData.endLocation,
+        vehicleType: journeyData.vehicleType,
+      });
+      setAvailableOrders(toArray(response));
+      setShowCheckOrders(true);
+    } catch (error) {
+      console.error('Error checking orders:', error);
+      alert('Failed to check orders');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAcceptOrder = async (delivery) => {
+    if (!delivery?._id) return;
+    try {
+      const response = await deliveryAPI.acceptDelivery(delivery._id);
+      alert(`Order accepted! OTP: ${response?.data?.otp ?? 'N/A'}`);
+      setAvailableOrders((prev) => prev.filter((d) => d._id !== delivery._id));
+      fetchMyJobs();
+    } catch (error) {
+      console.error('acceptDelivery error:', error);
+      alert('Failed to accept order');
+    }
+  };
+
+  const handleStartDelivery = async (delivery) => {
+    if (!delivery?._id) return;
+    try {
+      await deliveryAPI.startDelivery(delivery._id);
+      alert('Delivery started!');
+      fetchMyJobs();
+    } catch (error) {
+      console.error('startDelivery error:', error);
+      alert('Failed to start delivery');
+    }
+  };
+
+  const handleCompleteDelivery = async (delivery) => {
+    if (!delivery?._id) return;
+    const otp = otpInput[delivery._id];
+    if (!otp) {
+      alert('Please enter OTP');
+      return;
+    }
+    try {
+      await deliveryAPI.completeDelivery(delivery._id, otp);
+      alert('Delivery completed successfully! Payment marked as complete.');
+      setOtpInput((prev) => ({ ...prev, [delivery._id]: '' }));
+      fetchMyJobs();
+    } catch (error) {
+      console.error('completeDelivery error:', error);
+      alert(error.response?.data?.message || 'Invalid OTP');
+    }
+  };
 
   return (
-    <div style={{ width: "100%", height }}>
-      <MapContainer center={fallbackCenter} zoom={zoom} style={{ height: "100%", width: "100%" }}>
-        <TileLayer
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-          // optional attribution to be explicit
-          attribution="&copy; OpenStreetMap contributors"
-        />
-        {pA && (
-          <Marker position={pA}>
-            <Popup>Pickup Location</Popup>
-          </Marker>
+    <div className="min-h-screen bg-gray-100 py-8">
+      <div className="container mx-auto px-4">
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h1 className="text-3xl font-bold text-gray-800 mb-2">Traveler Dashboard</h1>
+          <p className="text-gray-600">UPI ID: {user?.upiId || 'Not set'}</p>
+        </div>
+
+        {/* Journey Setup */}
+        <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">Set Your Journey</h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-4">
+            <LocationInput
+              label="Journey Start Location"
+              placeholder="Where are you starting from?"
+              onLocationSelect={(location) =>
+                setJourneyData((prev) => ({ ...prev, startLocation: location }))
+              }
+            />
+            <LocationInput
+              label="Journey End Location"
+              placeholder="Where are you going?"
+              onLocationSelect={(location) =>
+                setJourneyData((prev) => ({ ...prev, endLocation: location }))
+              }
+            />
+          </div>
+
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Vehicle Type
+            </label>
+            <select
+              value={journeyData.vehicleType}
+              onChange={(e) =>
+                setJourneyData((prev) => ({ ...prev, vehicleType: e.target.value }))
+              }
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary focus:border-transparent"
+            >
+              <option value="geared motorbike">🏍️ Geared Motorbike (Small packages)</option>
+              <option value="scooter">🛵 Scooter (Medium packages)</option>
+              <option value="car">🚗 Car (Large packages)</option>
+            </select>
+          </div>
+
+          <button
+            onClick={handleCheckOrders}
+            disabled={loading || !journeyData.startLocation || !journeyData.endLocation}
+            className="w-full bg-secondary text-white py-3 rounded-lg hover:bg-green-600 transition-colors disabled:bg-gray-400"
+          >
+            {loading ? 'Checking...' : '🔍 Check for Available Orders'}
+          </button>
+        </div>
+
+        {/* Available Orders */}
+        {showCheckOrders && (
+          <div className="bg-white rounded-lg shadow-md p-6 mb-6">
+            <h2 className="text-2xl font-bold text-gray-800 mb-4">
+              Available Orders ({availableOrders.length})
+            </h2>
+
+            {availableOrders.length === 0 ? (
+              <p className="text-gray-600 text-center py-8">
+                No orders found on your route. Try a different route or check back later.
+              </p>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {availableOrders.map((order) => (
+                  <DeliveryCard
+                    key={order._id}
+                    delivery={order}
+                    onAction={handleAcceptOrder}
+                    actionLabel="Accept Order"
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
-        {pB && (
-          <Marker position={pB}>
-            <Popup>Delivery Location</Popup>
-          </Marker>
-        )}
-        {hasBoth && (
-          <Polyline
-            positions={positions}
-            pathOptions={{ color: "#0ea5e9", weight: 4 }}
-          />
-        )}
-        <Fit points={positions} />
-      </MapContainer>
+
+        {/* My Active Jobs */}
+        <div className="bg-white rounded-lg shadow-md p-6">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4">
+            My Deliveries ({myJobs.length})
+          </h2>
+
+          {myJobs.length === 0 ? (
+            <p className="text-gray-600 text-center py-8">
+              No active deliveries. Check for orders to get started!
+            </p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {myJobs.map((job) => (
+                <div key={job._id}>
+                  <DeliveryCard
+                    delivery={job}
+                    showOTP={job.status === 'accepted' || job.status === 'in-transit'}
+                  />
+
+                  {job.status === 'accepted' && (
+                    <button
+                      onClick={() => handleStartDelivery(job)}
+                      className="w-full mt-3 bg-blue-500 text-white py-2 rounded-lg hover:bg-blue-600"
+                    >
+                      Start Delivery
+                    </button>
+                  )}
+
+                  {job.status === 'in-transit' && (
+                    <div className="mt-3">
+                      <input
+                        type="text"
+                        placeholder="Enter OTP from receiver"
+                        value={otpInput[job._id] || ''}
+                        onChange={(e) =>
+                          setOtpInput((prev) => ({ ...prev, [job._id]: e.target.value }))
+                        }
+                        maxLength={6}
+                        className="w-full px-4 py-2 border border-gray-300 rounded-lg mb-2"
+                      />
+                      <button
+                        onClick={() => handleCompleteDelivery(job)}
+                        className="w-full bg-green-500 text-white py-2 rounded-lg hover:bg-green-600"
+                      >
+                        Complete Delivery
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };
 
-export default MapView;
+export default TravelerDashboard;

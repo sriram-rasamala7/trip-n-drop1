@@ -13,7 +13,7 @@ const app = express();
 app.use(cors({
   origin: [
     "http://localhost:5173",
-    "https://your-frontend.vercel.app"
+    "https://trip-n-drop1-murex.vercel.app/"
   ],
   credentials: true,
 }));
